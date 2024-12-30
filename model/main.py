@@ -42,6 +42,9 @@ def generate_output_dir(args, base_output_dir="outputs", custom_desc=None):
 
 
 def update(d, u):
+    """
+    合并字典d以及字典u
+    """
     for k, v in u.items():
         if isinstance(v, collections.abc.Mapping):
             d[k] = update(d.get(k, {}), v)
@@ -53,25 +56,25 @@ def update(d, u):
 def iter_configs(args):
     COMMAN = "common"
     with open(args.config, "r") as f:
-        tunning_params = json.load(f)
+        tunning_params = json.load(f)       # 读入json文件
     base_output_dir = args.outputdir if args.outputdir is not None else "Results"
     common_config = {}
     if COMMAN in tunning_params:
-        common_config = tunning_params[COMMAN]
+        common_config = tunning_params[COMMAN]  # 读入并删除json文件中的common设置
         del tunning_params[COMMAN]
     log_fh = None
     global log
-    for desc, params in tunning_params.items():
-        repeating = params.get('repeating', 1)
+    for desc, params in tunning_params.items(): # 除了common以外的其他设置
+        repeating = params.get('repeating', 1)  # 如果存在repeating则获取，没有就认为默认值为1
         args.outputdir = None
         if "args" in common_config:
             for key, val in common_config['args'].items():
-                setattr(args, key, val)
+                setattr(args, key, val)         # 设置args对象的key变量值为val
         if "args" in params:
             for key, val in params['args'].items():
                 setattr(args, key, val)
 
-        if args.featuresdir is None or not isdir(args.featuresdir):
+        if args.featuresdir is None or not isdir(args.featuresdir):     # 没有特征文件情况
             print("[!] Non existing featuresdir: {}".format(args.featuresdir))
             return
 
@@ -93,7 +96,7 @@ def iter_configs(args):
             # Create logger
             if log_fh is not None:
                 log.removeHandler(log_fh)
-            log, log_fh = set_logger_filehandler(LOG_NAME, args.debug,
+            log, log_fh = set_logger_filehandler(LOG_NAME, args.debug,      # 设置log格式和语法
                                                  args.outputdir, "tunning")
 
             if testing:

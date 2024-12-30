@@ -25,6 +25,7 @@ from collections import defaultdict
 from tqdm import tqdm
 
 GRAPH_TYPES = ['ISCG','TSCG','SOG']
+# GRAPH_TYPES = ['ISCG']
 
 def parse_nxopr(pcode_asm):
     s = pcode_asm.find('(')
@@ -77,6 +78,17 @@ def normalize_pcode(pcode, arch):
 
 
 def normalize_sng_opc(opc, arch):
+    """返回元组
+
+    Args:
+        opc: 如下Raw Formats所示
+        arch (string)
+
+    Returns:
+        (string, string): 'val'/'opc', f'L_{v}'/... 
+    """
+
+
     # Raw Formats:
     # ConstLong: L(%x, %d)
     # ConstDouble: D(%f, %d)
@@ -86,14 +98,14 @@ def normalize_sng_opc(opc, arch):
     # 1. Retain small integers.
     # 2. Register regs with arch id.
     if opc.startswith('L('):
-        v = int(opc[2:opc.find(',')], 16)
+        v = int(opc[2:opc.find(',')], 16)       # L(8000, 4) ->  8000
         return 'val', f'L_{v}'
     elif opc.startswith('D('):
         v = float(opc[2:opc.find(',')])
         return 'val', f'D_{v}'
-    elif opc.startswith('REG('):
-        v = int(opc[4:opc.find(',')], 16)
-        s = int(opc[opc.find(',')+1:opc.find(')')], 16)
+    elif opc.startswith('REG('):                
+        v = int(opc[4:opc.find(',')], 16)                   # REG(14, 4) -> 14
+        s = int(opc[opc.find(',')+1:opc.find(')')], 16)     # REG(14, 4) -> 4
         return f'{arch}_reg', f'{arch}_REG_{v}_{s}'
     elif opc[:3] in ['MEM', 'STA', 'OTH']:
         return 'val', opc[:3]
@@ -104,11 +116,21 @@ def normalize_sng_opc(opc, arch):
 
 
 def process_nverb(gtype, nverb: list, arch):
+    '''函数用于进行pcode的列表的process
+
+    Args:
+        gtype (string): 图的类别 
+        nverb (list): 进行pcode的列表
+        arch (string)
+
+    Returns:
+        list: [(ty, opc),]
+    '''
     assert isinstance(nverb, list)
     if len(nverb) == 0:
         return []
     if gtype == 'SOG':
-        ty, opc = normalize_sng_opc(nverb[0], arch)
+        ty, opc = normalize_sng_opc(nverb[0], arch)     # 返回type和opcode
         return [(ty, opc),]
     elif gtype == 'ISCG':
         parsed = parse_pcode(nverb[0])
@@ -131,13 +153,29 @@ def process_nverb(gtype, nverb: list, arch):
 
 
 def token_mapping(input_folder, output_dir, freq_mode=True):
+    '''导入input_folder中的特征数据
+    Params:
+        opc_counters: dict
+            对每个opcode进行计数, 形如 opc_occurs['ISCG']: {
+                                        'opc': {'INT_SUB': 5407923, 'RETURN': 396686, ...},
+                                        'val': {'const_0x0': 11936495, 'ram': 7990468, 'const_0x4': 4774895,  ...}, 
+                                        'mips_reg': {'mips_register_0x10_8': 2699158, 'mips_register_0x20_8': 1486432, ...}, 
+                                        'arm_reg': {'arm_register_0x34_4': 482740, 'arm_register_0x20_4': 2595679,  ...}, 
+                                        'x_reg': {'x_register_0x200_1': 1032346, 'x_register_0x1c_4': 752324, ...}
+                                        }
+        opc_occurs: dict
+            同上，多了一个参数opc_occurs['ISCG']['num_funcs']
+    Returns: 
+        idmaps: dict
+            形如{"SOG":{}}
+    '''
     print("[i] Freq_mode: ", freq_mode)
     idmaps, opc_counters, opc_occurs = {}, {}, {}
     cached = {}
     num_func = 0
 
     # Try loading caches
-    for gtype in GRAPH_TYPES:
+    for gtype in GRAPH_TYPES:       # gtype是SOG之类
         sub_dir = get_sub_dir(output_dir, gtype)
         counter_path = os.path.join(sub_dir, "opc_counter.json")
         occurs_path = os.path.join(sub_dir, "opc_occurs.json")
@@ -149,6 +187,12 @@ def token_mapping(input_folder, output_dir, freq_mode=True):
                 num_func = opc_occurs[gtype]["num_funcs"]
             cached[gtype] = True
         else:
+            # 每个opc_counters[gtype], opc_occurs[gtype]字典包括
+            # 'opc': Counter()  
+            # 'val': Counter()  
+            # 'mips_reg': Counter()
+            # 'arm_reg': Counter()  
+            # 'x_reg': Counter()
             opc_counters[gtype], opc_occurs[gtype] = (dict([
                 ('opc', Counter()),
                 ('val', Counter()),
@@ -159,7 +203,8 @@ def token_mapping(input_folder, output_dir, freq_mode=True):
     any_cached = sum(cached[gtype] for gtype in GRAPH_TYPES) != 0
     not_cached_graph_types = list(g for g in GRAPH_TYPES if not cached[g])
 
-    if len(not_cached_graph_types) != 0:
+    
+    if len(not_cached_graph_types) != 0: # 如果counter_path和occurs_path不存在
         # Collect opc stats info
         for f_json in tqdm(os.listdir(input_folder)):
             if not f_json.endswith(".json"):
@@ -171,19 +216,19 @@ def token_mapping(input_folder, output_dir, freq_mode=True):
 
             arch = f_json.split('-')[0][:-2]
             idb_path = list(jj.keys())[0]
-            j_data = jj[idb_path]
+            j_data = jj[idb_path]   # j_data是json中的data部分
             for key in ['arch']:
                 if key in j_data:
                     del j_data[key]
 
             # Iterate over each function
-            for fva in j_data:
+            for fva in j_data:      # fva是每个形如"0x9ae0":{} 的键值对
                 for gtype in not_cached_graph_types:
                     opc_sets = defaultdict(set)
                     fva_data = j_data[fva][gtype]
                     # Iterate over each basic-block
-                    for bb in fva_data['nverbs']:
-                        nverb = fva_data['nverbs'][bb]
+                    for bb in fva_data['nverbs']:   # 是如{"6708" : ["INT_ADD"]}的键值对
+                        nverb = fva_data['nverbs'][bb]  # nverb就是pcode
                         for ty, opc in process_nverb(gtype, nverb, arch):
                             opc_counters[gtype][ty].update([opc])
                             opc_sets[ty].add(opc)
@@ -213,8 +258,8 @@ def token_mapping(input_folder, output_dir, freq_mode=True):
             ('opc', 55 if gtype != 'ACFG' else 50), 
             ('val', 0.01),    
             *[(f'{arch}_reg', 0.01) for arch in ['mips', 'arm', 'x']],
-        ]) # thresholds
-        for ty, opc_cnt in opc_cnts.items():
+        ]) # thresholds 
+        for ty, opc_cnt in opc_cnts.items():    
             if ty.endswith("_occur"):
                 continue
             if not isinstance(opc_cnt, dict):
@@ -242,17 +287,27 @@ def token_mapping(input_folder, output_dir, freq_mode=True):
 
 
 def create_graph(fva_data):
+    """创建有向图并且返回节点
+
+    Args:
+        fva_data: 包含nodes,nverbs,edges 三个key的字典
+    
+    Returns:
+        adj_mat: 邻接矩阵，表示图的结构，以稀疏矩阵形式返回。
+        nodelist: 包含图中所有节点的 ID, 用于矩阵和图节点之间的索引映射。
+
+    """
     NUM_EDGE_TYPE = 4
     NUM_POS_ENC = 8
 
     nodes, edges = fva_data['nodes'], fva_data['edges']
 
-    G = nx.MultiDiGraph()
+    G = nx.MultiDiGraph()       # 创建一个有向多重图
     for node in nodes:
         G.add_node(node)
     last_edge, pos_id = (-1, -1), -1
     for edge in edges:
-        if (edge[0], edge[2]) == last_edge:
+        if (edge[0], edge[2]) == last_edge: # last_edge 是（-1，-1）有什么意义？
             if pos_id + 1 < NUM_POS_ENC:
                 pos_id += 1
         else:
@@ -273,14 +328,14 @@ def coo2tuple(coo_mat):
 
 def create_features_matrix(node_list, fva_data, opc_dict, gtype, arch):
     """
-    Create the matrix with numerical features.
+    Create the matrix with numerical features. 提供了一个特征矩阵，可以和上面函数的邻接矩阵一起使用
 
     Args:
         node_list: list of basic-blocks addresses
         fva_data: dict with features associated to a function
         opc_dict: selected opcodes.
 
-    Return
+    Returns:
         np.matrix: Numpy matrix with selected features.
     """
     assert gtype in ['SOG', 'TSCG', 'ISCG', 'ACFG']
@@ -338,12 +393,16 @@ def coo_matrix_to_str(cmat):
     return mat_str
 
 def process_one_file(args):
+    """
+    Args:
+        args: ('dbs/.../{...}.json', {'ISCG': {...}, 'TSCG': {...}, 'SOG': {...}}, False, True)
+    """
     json_path, opc_dicts, dump_str, dump_pkl = args
     with open(json_path) as f_in:
         jj = json.load(f_in)
     f_json = os.path.basename(json_path)
     arch = f_json.split('-')[0][:-2]
-    idb_path = list(jj.keys())[0]
+    idb_path = list(jj.keys())[0]                      
     # print("[D] Processing: {}".format(idb_path))
     str_func_dict, pkl_func_dict = defaultdict(dict), defaultdict(dict)
     j_data = jj[idb_path]
@@ -354,7 +413,7 @@ def process_one_file(args):
     for fva in j_data:
         for gtype in GRAPH_TYPES:
             fva_data = j_data[fva][gtype]
-            g_coo_mat, nodes = create_graph(fva_data)
+            g_coo_mat, nodes = create_graph(fva_data)   
             f_list = create_features_matrix(
                 nodes, fva_data, opc_dicts[gtype], gtype, arch)
             if not fva.startswith("0x"):
@@ -380,7 +439,7 @@ def create_functions_dict(input_folder, opc_dicts, dump_str, dump_pkl):
         input_folder: a folder with JSON files from IDA_acfg_disasm
         opc_dict: dictionary that maps most common opcodes to their ranking.
 
-    Return
+    Returns:
         dict: map each function to a graph and features matrix
     """
     str_func_dict = {g:defaultdict(dict) for g in GRAPH_TYPES} if dump_str else {}
@@ -403,6 +462,11 @@ def create_functions_dict(input_folder, opc_dicts, dump_str, dump_pkl):
 
 
 def get_sub_dir(output_dir, gtype, dataset=None):
+    """创建output下对应的子文件夹，并返回此文件夹
+    Returns:
+        sub_dir: string 
+            创建的自己文件夹的路径
+    """
     if dataset is not None:
         sub_dir = os.path.join(output_dir, f'pcode_{gtype.lower()}', dataset)
     else:

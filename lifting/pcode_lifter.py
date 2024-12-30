@@ -150,10 +150,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # 将命令行的值赋值给四个变量
     cfg_summary_dir, output_dir, graph_type, verbose = (
-        getattr(args, arg)
-        for arg in ["cfg_summary", "output_dir", "graph_type", "verbose"]
-    )
+        getattr(args, arg) for arg in ["cfg_summary", "output_dir", "graph_type", "verbose"]
+    )       
 
     firmware_info = None
     if args.firmware_info is not None:
@@ -161,6 +161,7 @@ if __name__ == "__main__":
 
     NPROC = int(args.nproc)
 
+    # 更换目录为当前目录
     os.chdir(ROOT_PATH)
 
     if not os.path.exists(output_dir):
